@@ -1,6 +1,18 @@
 [package]
 name = "user"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
-[dependencies]
+[[bin]]
+name = "user"
+path = "src/main.rs"
+
+[profile.dev]
+panic = "abort"
+opt-level = 2
+lto = true
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = true
