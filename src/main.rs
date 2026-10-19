@@ -144,12 +144,37 @@ macro_rules! println {
     }};
 }
 
+// --- Direct UART MMIO (тест B1) ---
+const UART_BASE: usize = 0x09000000;
+const UART_DR: *mut u32 = UART_BASE as *mut u32;
+const UART_FR: *const u32 = (UART_BASE + 0x18) as *const u32;
+
+fn uart_putc(c: u8) {
+    unsafe {
+        while (*UART_FR & (1 << 5)) != 0 {}
+        core::ptr::write_volatile(UART_DR, c as u32);
+    }
+}
+
+fn uart_puts(s: &str) {
+    for b in s.bytes() {
+        if b == b'\n' { uart_putc(b'\r'); }
+        uart_putc(b);
+    }
+}
+
 // --- main ---
 #[no_mangle]
 pub extern "C" fn user_main() -> ! {
     let pid = sys_getpid();
 
-    // Тест libc
+    // Тест B1: прямой MMIO write
+    if pid == 2 {
+        uart_puts("direct MMIO write from EL0!\n");
+        sys_exit(0);
+    }
+
+    // Остальные (pid 3) тестируют libc через syscall
     println!("[pid={}] hello from libc", pid);
 
     let mut v: Vec<u32> = Vec::new();
