@@ -74,6 +74,16 @@ fn sys_recv(msg: *mut Message) -> i64 {
     ret
 }
 
+fn sys_irq_ack(intid: u64) {
+    unsafe {
+        asm!(
+            "mov x8, #7", "svc #0",
+            inlateout("x0") intid => _,
+            out("x8") _,
+        );
+    }
+}
+
 // --- Heap (bump allocator) ---
 const HEAP_START: usize = 0x40800000;
 const HEAP_END:   usize = 0x40A00000;
@@ -148,6 +158,31 @@ macro_rules! println {
 const UART_BASE: usize = 0x09000000;
 const UART_DR: *mut u32 = UART_BASE as *mut u32;
 const UART_FR: *const u32 = (UART_BASE + 0x18) as *const u32;
+const UART_IMSC: *mut u32 = (UART_BASE + 0x38) as *mut u32;   // interrupt mask set clear
+const UART_ICR:  *mut u32 = (UART_BASE + 0x44) as *mut u32;   // interrupt clear
+const UART_CR:   *mut u32 = (UART_BASE + 0x30) as *mut u32;   // control
+const UART_FR_RXFE: u32 = 1 << 4;                             // RX FIFO empty
+
+fn uart_rx_init() {
+    unsafe {
+        // CR: UARTEN | TXE | RXE
+        core::ptr::write_volatile(UART_CR, (1 << 0) | (1 << 8) | (1 << 9));
+        // ICR: clear all pending
+        core::ptr::write_volatile(UART_ICR, 0x7FF);
+        // IMSC: RXIM bit 4 (receive interrupt mask)
+        core::ptr::write_volatile(UART_IMSC, 1 << 4);
+    }
+}
+
+fn uart_try_read() -> Option<u8> {
+    unsafe {
+        if (*UART_FR & UART_FR_RXFE) != 0 {
+            None
+        } else {
+            Some((core::ptr::read_volatile(UART_DR) & 0xFF) as u8)
+        }
+    }
+}
 
 fn uart_putc(c: u8) {
     unsafe {
@@ -164,20 +199,36 @@ fn uart_puts(s: &[u8]) {
 }
 
 // --- UART server loop ---
-// tag=1: WRITE, data[0]=ptr, data[1]=len
 fn uart_server_loop() -> ! {
     uart_puts(b"uart_server up, pid=2\n");
+    uart_rx_init();
+    // Первый enable IRQ 33 — с этого момента приходит RX IRQ
+    sys_irq_ack(33);
+
     loop {
         let mut msg = Message { tag: 0, data: [0; 7] };
         sys_recv(&mut msg);
-        if msg.tag == 1 {
-            let ptr = msg.data[0] as *const u8;
-            let len = msg.data[1] as usize;
-            for i in 0..len {
-                let c = unsafe { *ptr.add(i) };
-                if c == b'\n' { uart_putc(b'\r'); }
-                uart_putc(c);
+        match msg.tag {
+            1 => {
+                // WRITE
+                let ptr = msg.data[0] as *const u8;
+                let len = msg.data[1] as usize;
+                for i in 0..len {
+                    let c = unsafe { *ptr.add(i) };
+                    if c == b'\n' { uart_putc(b'\r'); }
+                    uart_putc(c);
+                }
             }
+            2 => {
+                // IRQ: прочитать все доступные байты из UART, echo
+                while let Some(c) = uart_try_read() {
+                    if c == b'\r' { uart_putc(b'\n'); }
+                    else if c == b'\n' { uart_putc(b'\n'); }
+                    else { uart_putc(c); }
+                }
+                sys_irq_ack(33);
+            }
+            _ => {}
         }
     }
 }
