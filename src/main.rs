@@ -144,7 +144,7 @@ macro_rules! println {
     }};
 }
 
-// --- Direct UART MMIO (тест B1) ---
+// --- UART MMIO ---
 const UART_BASE: usize = 0x09000000;
 const UART_DR: *mut u32 = UART_BASE as *mut u32;
 const UART_FR: *const u32 = (UART_BASE + 0x18) as *const u32;
@@ -156,48 +156,50 @@ fn uart_putc(c: u8) {
     }
 }
 
-fn uart_puts(s: &str) {
-    for b in s.bytes() {
+fn uart_puts(s: &[u8]) {
+    for &b in s {
         if b == b'\n' { uart_putc(b'\r'); }
         uart_putc(b);
     }
+}
+
+// --- UART server loop ---
+// tag=1: WRITE, data[0]=ptr, data[1]=len
+fn uart_server_loop() -> ! {
+    uart_puts(b"uart_server up, pid=2\n");
+    loop {
+        let mut msg = Message { tag: 0, data: [0; 7] };
+        sys_recv(&mut msg);
+        if msg.tag == 1 {
+            let ptr = msg.data[0] as *const u8;
+            let len = msg.data[1] as usize;
+            for i in 0..len {
+                let c = unsafe { *ptr.add(i) };
+                if c == b'\n' { uart_putc(b'\r'); }
+                uart_putc(c);
+            }
+        }
+    }
+}
+
+fn client_hello(uart_pid: u64, text: &'static [u8]) -> ! {
+    let msg = Message {
+        tag: 1,
+        data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
+    };
+    sys_send(uart_pid, &msg);
+    sys_exit(0);
 }
 
 // --- main ---
 #[no_mangle]
 pub extern "C" fn user_main() -> ! {
     let pid = sys_getpid();
-
-    // Тест B1: прямой MMIO write
-    if pid == 2 {
-        uart_puts("direct MMIO write from EL0!\n");
-        sys_exit(0);
-    }
-
-    // Остальные (pid 3) тестируют libc через syscall
-    println!("[pid={}] hello from libc", pid);
-
-    let mut v: Vec<u32> = Vec::new();
-    for i in 0..10 { v.push(i * 10); }
-    println!("[pid={}] vec: len={} first={} last={}", pid, v.len(), v[0], v[v.len()-1]);
-
-    let s: String = String::from("dynamic string");
-    println!("[pid={}] string: {}", pid, s);
-
-    let f = format!("format: {} + {} = {}", 2, 3, 5);
-    println!("[pid={}] {}", pid, f);
-
-    // Тест IPC
-    if pid == 2 {
-        let msg = Message { tag: 42, data: [0xDEAD, 0xBEEF, 0, 0, 0, 0, 0] };
-        let r = sys_send(3, &msg);
-        println!("[pid=2] sender: {}", if r == 0 { "OK" } else { "FAIL" });
-        sys_exit(0);
-    } else {
-        let mut msg = Message { tag: 0, data: [0; 7] };
-        sys_recv(&mut msg);
-        println!("[pid=3] receiver: tag={} d0={:#x} d1={:#x}", msg.tag, msg.data[0], msg.data[1]);
-        sys_exit(0);
+    match pid {
+        2 => uart_server_loop(),
+        3 => client_hello(2, b"client1 says hi via IPC\n"),
+        4 => client_hello(2, b"client2 says hi via IPC\n"),
+        _ => sys_exit(1),
     }
 }
 
