@@ -218,6 +218,8 @@ fn uart_server_loop() -> ! {
                     if c == b'\n' { uart_putc(b'\r'); }
                     uart_putc(c);
                 }
+                // Искусственная задержка — очередь клиента заполнится
+                for _ in 0..50_000_000u64 { unsafe { asm!("nop") } }
             }
             2 => {
                 // IRQ: прочитать все доступные байты из UART, echo
@@ -234,11 +236,13 @@ fn uart_server_loop() -> ! {
 }
 
 fn client_hello(uart_pid: u64, text: &'static [u8]) -> ! {
-    let msg = Message {
-        tag: 1,
-        data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
-    };
-    sys_send(uart_pid, &msg);
+    for _ in 0..20 {
+        let msg = Message {
+            tag: 1,
+            data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
+        };
+        sys_send(uart_pid, &msg);
+    }
     sys_exit(0);
 }
 
