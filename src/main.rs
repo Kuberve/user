@@ -89,25 +89,38 @@ pub extern "C" fn user_main() -> ! {
     let pid = sys_getpid();
     match pid {
         2 => uart_server_loop(),
-        3 => {
-            println!("[pid=3] open HELLO.TXT");
+                3 => {
+            // 1. Прочитать оригинал
+            println!("[pid=3] reading HELLO.TXT");
             let fd = kuberve_libc::sys_open("HELLO.TXT", 0);
             if fd < 0 { println!("[pid=3] open failed"); sys_exit(1); }
             let mut buf = [0u8; 64];
             let n = kuberve_libc::sys_read(fd, buf.as_mut_ptr(), 64);
             kuberve_libc::sys_close(fd);
-            if n < 0 { println!("[pid=3] read failed"); sys_exit(1); }
-            let s = core::str::from_utf8(&buf[..n as usize]).unwrap_or("<binary>");
-            println!("[pid=3] read {} bytes: '{}'", n, s.trim_end());
+            let s = core::str::from_utf8(&buf[..n as usize]).unwrap_or("?");
+            println!("[pid=3] original: '{}'", s.trim_end());
 
-            let fd = kuberve_libc::sys_open("USER.ELF", 0);
-            if fd < 0 { sys_exit(1); }
-            let mut hdr = [0u8; 16];
-            let n = kuberve_libc::sys_read(fd, hdr.as_mut_ptr(), 16);
+            // 2. Записать "Hi FAT32!"
+            println!("[pid=3] writing 'Hi FAT32!'");
+            let fd = kuberve_libc::sys_open("HELLO.TXT", 0);
+            if fd < 0 { println!("[pid=3] open for write failed"); sys_exit(1); }
+            let data = b"Hello FAT32, v2!\n";
+            let w = kuberve_libc::sys_write_file(fd, data.as_ptr(), data.len() as u64);
             kuberve_libc::sys_close(fd);
-            print!("[pid=3] USER.ELF first 16: ");
-            for i in 0..n as usize { print!("{:02x} ", hdr[i]); }
-            println!();
+            if w < 0 {
+                println!("[pid=3] write failed: {}", w);
+                sys_exit(1);
+            }
+            println!("[pid=3] wrote {} bytes", w);
+
+            // 3. Прочитать обратно
+            let fd = kuberve_libc::sys_open("HELLO.TXT", 0);
+            if fd < 0 { sys_exit(1); }
+            let n = kuberve_libc::sys_read(fd, buf.as_mut_ptr(), 64);
+            kuberve_libc::sys_close(fd);
+            let s = core::str::from_utf8(&buf[..n as usize]).unwrap_or("?");
+            println!("[pid=3] after write: '{}'", s.trim_end());
+
             sys_exit(0);
         }
         4 => client_hello(2, b"client2 says hi via IPC\n"),
