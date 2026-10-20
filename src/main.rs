@@ -53,11 +53,9 @@ fn uart_server_loop() -> ! {
         sys_recv(&mut msg);
         match msg.tag {
             1 => {
-                // WRITE
-                let ptr = msg.data[0] as *const u8;
-                let len = msg.data[1] as usize;
-                for i in 0..len {
-                    let c = unsafe { *ptr.add(i) };
+                // WRITE: kernel уже упаковал байты в data[1..], data[0] = len
+                let bytes = kuberve_libc::write_payload(&msg);
+                for &c in bytes {
                     if c == b'\n' { uart::putc(b'\r'); }
                     uart::putc(c);
                 }
