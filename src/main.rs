@@ -89,7 +89,7 @@ pub extern "C" fn user_main() -> ! {
     let pid = sys_getpid();
     match pid {
         2 => uart_server_loop(),
-        3 => client_hello(2, b"client1 says hi via IPC\n"),
+        3 => client_hello(2, b"client1 V2 TEST OK\n"),
         4 => client_hello(2, b"client2 says hi via IPC\n"),
         _ => sys_exit(1),
     }
