@@ -6,7 +6,6 @@ extern crate alloc;
 
 use core::arch::{asm, global_asm};
 use core::alloc::Layout;
-use core::fmt;
 
 use kuberve_libc::{
     Message,
@@ -92,21 +91,30 @@ pub extern "C" fn user_main() -> ! {
         3 => {
             use kuberve_libc::flags;
 
-            println!("[pid=3] create NEWFILE.TXT");
-            let fd = kuberve_libc::sys_open("NEWFILE.TXT", flags::O_CREAT);
-            if fd < 0 { println!("[pid=3] create failed: {}", fd); sys_exit(1); }
-            println!("[pid=3] created fd={}", fd);
-            kuberve_libc::sys_close(fd);
+            // 1. Создать TEST2.TXT, записать 1500 байт 'A'
+            println!("[pid=3] === Test extend 1500 bytes ===");
+            let fd = kuberve_libc::sys_open("TEST2.TXT", flags::O_CREAT);
+            if fd < 0 { println!("[pid=3] create failed"); sys_exit(1); }
 
-            // Проверить, что USER.ELF цел
-            let fd = kuberve_libc::sys_open("USER.ELF", flags::O_RDONLY);
-            if fd < 0 { println!("[pid=3] USER.ELF open failed"); sys_exit(1); }
-            let mut hdr = [0u8; 16];
-            let n = kuberve_libc::sys_read(fd, hdr.as_mut_ptr(), 16);
+            let data = [b'A'; 1500];
+            let w = kuberve_libc::sys_write_file(fd, data.as_ptr(), 1500);
             kuberve_libc::sys_close(fd);
-            print!("[pid=3] USER.ELF first 16: ");
-            for i in 0..n as usize { print!("{:02x} ", hdr[i]); }
-            println!();
+            if w < 0 { println!("[pid=3] write failed: {}", w); sys_exit(1); }
+            println!("[pid=3] wrote {} bytes", w);
+
+            // 2. Прочитать обратно и проверить
+            let fd = kuberve_libc::sys_open("TEST2.TXT", flags::O_RDONLY);
+            if fd < 0 { println!("[pid=3] reopen failed"); sys_exit(1); }
+            let mut buf = [0u8; 2000];
+            let n = kuberve_libc::sys_read(fd, buf.as_mut_ptr(), 2000);
+            kuberve_libc::sys_close(fd);
+            if n < 0 { println!("[pid=3] read failed"); sys_exit(1); }
+
+            let mut ok = n == 1500;
+            for i in 0..n as usize {
+                if buf[i] != b'A' { ok = false; break; }
+            }
+            println!("[pid=3] read {} bytes, all 'A': {}", n, ok);
 
             sys_exit(0);
         }
