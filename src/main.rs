@@ -89,7 +89,27 @@ pub extern "C" fn user_main() -> ! {
     let pid = sys_getpid();
     match pid {
         2 => uart_server_loop(),
-        3 => client_hello(2, b"client1 V2 TEST OK\n"),
+        3 => {
+            println!("[pid=3] open HELLO.TXT");
+            let fd = kuberve_libc::sys_open("HELLO.TXT", 0);
+            if fd < 0 { println!("[pid=3] open failed"); sys_exit(1); }
+            let mut buf = [0u8; 64];
+            let n = kuberve_libc::sys_read(fd, buf.as_mut_ptr(), 64);
+            kuberve_libc::sys_close(fd);
+            if n < 0 { println!("[pid=3] read failed"); sys_exit(1); }
+            let s = core::str::from_utf8(&buf[..n as usize]).unwrap_or("<binary>");
+            println!("[pid=3] read {} bytes: '{}'", n, s.trim_end());
+
+            let fd = kuberve_libc::sys_open("USER.ELF", 0);
+            if fd < 0 { sys_exit(1); }
+            let mut hdr = [0u8; 16];
+            let n = kuberve_libc::sys_read(fd, hdr.as_mut_ptr(), 16);
+            kuberve_libc::sys_close(fd);
+            print!("[pid=3] USER.ELF first 16: ");
+            for i in 0..n as usize { print!("{:02x} ", hdr[i]); }
+            println!();
+            sys_exit(0);
+        }
         4 => client_hello(2, b"client2 says hi via IPC\n"),
         _ => sys_exit(1),
     }
