@@ -16,3 +16,6 @@ lto = true
 panic = "abort"
 opt-level = 2
 lto = true
+
+[dependencies]
+kuberve-libc = { path = "../libc" }

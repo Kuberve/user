@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "kuberve-libc"
+version = "0.1.0"
+
+[[package]]
 name = "user"
 version = "0.1.0"
+dependencies = [
+ "kuberve-libc",
+]
