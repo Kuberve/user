@@ -91,31 +91,34 @@ pub extern "C" fn user_main() -> ! {
         3 => {
             println!("[pid=3] TCP client: connect to 10.0.2.2:8080");
             let fd = kuberve_libc::sys_socket(2, 1);
-            if fd < 0 { println!("[pid=3] socket failed"); sys_exit(1); }
+            if fd < 0 { sys_exit(1); }
 
-            let dst_ip: u32 = 0x0A000202;   // 10.0.2.2
+            let dst_ip: u32 = 0x0A000202;
             let r = kuberve_libc::sys_connect(fd, dst_ip, 8080);
             if r < 0 { println!("[pid=3] connect failed"); sys_exit(1); }
-            println!("[pid=3] CONNECTED to 10.0.2.2:8080");
+            println!("[pid=3] CONNECTED");
 
             let msg = b"Hello from Kuberve!\n";
-            let n = kuberve_libc::sys_tcp_send(fd, msg.as_ptr(), msg.len() as u64);
-            println!("[pid=3] sent {} bytes", n);
+            kuberve_libc::sys_tcp_send(fd, msg.as_ptr(), msg.len() as u64);
+            println!("[pid=3] sent {}", msg.len());
 
-            // Ждём reply
             let mut rbuf = [0u8; 256];
-            for _attempt in 0..15 {
+            let mut got = 0i64;
+            for _ in 0..15 {
                 let n = kuberve_libc::sys_tcp_recv(fd, rbuf.as_mut_ptr(), 256);
                 if n > 0 {
-                    println!("[pid=3] TCP reply: {} bytes", n);
-                    let s = core::str::from_utf8(&rbuf[..n as usize]).unwrap_or("<bin>");
-                    print!("[pid=3] content: '{}'", s);
-                    println!();
+                    got = n;
                     break;
                 }
-                kuberve_libc::sys_sleep(1);   // 1 сек
+                kuberve_libc::sys_sleep(1);
             }
+            if got > 0 {
+                println!("[pid=3] TCP reply: {} bytes", got);
+            }
+
+            println!("[pid=3] closing...");
             kuberve_libc::sys_close(fd);
+            println!("[pid=3] closed");
             sys_exit(0);
         }
         4 => client_hello(2, b"client2 says hi via IPC\n"),
