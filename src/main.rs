@@ -73,7 +73,7 @@ fn uart_server_loop() -> ! {
 }
 
 fn client_hello(uart_pid: u64, text: &'static [u8]) -> ! {
-    for _ in 0..20 {
+    for _ in 0..2 {
         let msg = Message {
             tag: 1,
             data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
@@ -91,30 +91,68 @@ pub extern "C" fn user_main() -> ! {
         3 => {
             use kuberve_libc::flags;
 
-            // 1. Создать TEST2.TXT, записать 1500 байт 'A'
-            println!("[pid=3] === Test extend 1500 bytes ===");
-            let fd = kuberve_libc::sys_open("TEST2.TXT", flags::O_CREAT);
-            if fd < 0 { println!("[pid=3] create failed"); sys_exit(1); }
+            println!("[pid=3] UDP test: DNS query to 10.0.2.3:53");
 
-            let data = [b'A'; 1500];
-            let w = kuberve_libc::sys_write_file(fd, data.as_ptr(), 1500);
-            kuberve_libc::sys_close(fd);
-            if w < 0 { println!("[pid=3] write failed: {}", w); sys_exit(1); }
-            println!("[pid=3] wrote {} bytes", w);
+            let fd = kuberve_libc::sys_socket(2, 2);   // AF_INET, SOCK_DGRAM
+            if fd < 0 { println!("[pid=3] socket failed"); sys_exit(1); }
+            println!("[pid=3] socket fd={}", fd);
 
-            // 2. Прочитать обратно и проверить
-            let fd = kuberve_libc::sys_open("TEST2.TXT", flags::O_RDONLY);
-            if fd < 0 { println!("[pid=3] reopen failed"); sys_exit(1); }
-            let mut buf = [0u8; 2000];
-            let n = kuberve_libc::sys_read(fd, buf.as_mut_ptr(), 2000);
-            kuberve_libc::sys_close(fd);
-            if n < 0 { println!("[pid=3] read failed"); sys_exit(1); }
+            let r = kuberve_libc::sys_bind(fd, 5555);
+            if r < 0 { println!("[pid=3] bind failed"); sys_exit(1); }
+            println!("[pid=3] bound to :5555");
 
-            let mut ok = n == 1500;
-            for i in 0..n as usize {
-                if buf[i] != b'A' { ok = false; break; }
+            // DNS query для "a.com" A record
+            let mut query = [0u8; 32];
+            query[0] = 0x12; query[1] = 0x34;   // ID
+            query[2] = 0x01; query[3] = 0x00;   // flags: standard, RD
+            query[4] = 0x00; query[5] = 0x01;   // QDCOUNT = 1
+            // rest zeros
+            // QNAME: "a" "com" ""
+            query[12] = 1; query[13] = b'a';
+            query[14] = 3; query[15] = b'c'; query[16] = b'o'; query[17] = b'm';
+            query[18] = 0;
+            // QTYPE = 1 (A), QCLASS = 1 (IN)
+            query[19] = 0; query[20] = 1;
+            query[21] = 0; query[22] = 1;
+            let query_len = 23;
+
+            // 10.0.2.3 → u32: (10<<24)|(0<<16)|(2<<8)|3 = 0x0A000203
+            let dst_ip: u32 = 0x0A000203;
+            let n = kuberve_libc::sys_sendto(fd, query.as_ptr(), query_len as u64, dst_ip, 53);
+            if n < 0 {
+                println!("[pid=3] sendto failed: {}", n);
+            } else {
+                println!("[pid=3] sent {} bytes to 10.0.2.3:53", n);
             }
-            println!("[pid=3] read {} bytes, all 'A': {}", n, ok);
+
+            // Ждём reply (polling + yield, чтобы kernel poll_rx успел)
+            let mut rbuf = [0u8; 512];
+            let mut reply_received = false;
+            for attempt in 0..1000 {
+                let mut src_ip = [0u8; 4];
+                let mut src_port: u16 = 0;
+                let r = kuberve_libc::sys_recvfrom(
+                    fd, rbuf.as_mut_ptr(), 512,
+                    src_ip.as_mut_ptr(), &mut src_port as *mut u16);
+                if r > 0 {
+                    print!("[pid=3] UDP reply: ");
+                    for i in 0..r.min(23) { print!("{:02x} ", rbuf[i as usize]); }
+                    println!();
+                    println!("[pid=3] UDP reply from {}.{}.{}.{}:{} len={}",
+                             src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, r);
+                    reply_received = true;
+                    break;
+                }
+                if attempt % 100 == 0 {
+                    kuberve_libc::sys_sleep(1);   // 1 тик = 1 сек, даём сети время
+                } else {
+                    kuberve_libc::sys_yield();
+                }
+            }
+            if !reply_received {
+                println!("[pid=3] no UDP reply (timeout)");
+            }
+            kuberve_libc::sys_close(fd);
 
             sys_exit(0);
         }
