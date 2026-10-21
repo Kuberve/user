@@ -89,71 +89,33 @@ pub extern "C" fn user_main() -> ! {
     match pid {
         2 => uart_server_loop(),
         3 => {
-            use kuberve_libc::flags;
-
-            println!("[pid=3] UDP test: DNS query to 10.0.2.3:53");
-
-            let fd = kuberve_libc::sys_socket(2, 2);   // AF_INET, SOCK_DGRAM
+            println!("[pid=3] TCP client: connect to 10.0.2.2:8080");
+            let fd = kuberve_libc::sys_socket(2, 1);
             if fd < 0 { println!("[pid=3] socket failed"); sys_exit(1); }
-            println!("[pid=3] socket fd={}", fd);
 
-            let r = kuberve_libc::sys_bind(fd, 5555);
-            if r < 0 { println!("[pid=3] bind failed"); sys_exit(1); }
-            println!("[pid=3] bound to :5555");
+            let dst_ip: u32 = 0x0A000202;   // 10.0.2.2
+            let r = kuberve_libc::sys_connect(fd, dst_ip, 8080);
+            if r < 0 { println!("[pid=3] connect failed"); sys_exit(1); }
+            println!("[pid=3] CONNECTED to 10.0.2.2:8080");
 
-            // DNS query для "a.com" A record
-            let mut query = [0u8; 32];
-            query[0] = 0x12; query[1] = 0x34;   // ID
-            query[2] = 0x01; query[3] = 0x00;   // flags: standard, RD
-            query[4] = 0x00; query[5] = 0x01;   // QDCOUNT = 1
-            // rest zeros
-            // QNAME: "a" "com" ""
-            query[12] = 1; query[13] = b'a';
-            query[14] = 3; query[15] = b'c'; query[16] = b'o'; query[17] = b'm';
-            query[18] = 0;
-            // QTYPE = 1 (A), QCLASS = 1 (IN)
-            query[19] = 0; query[20] = 1;
-            query[21] = 0; query[22] = 1;
-            let query_len = 23;
+            let msg = b"Hello from Kuberve!\n";
+            let n = kuberve_libc::sys_tcp_send(fd, msg.as_ptr(), msg.len() as u64);
+            println!("[pid=3] sent {} bytes", n);
 
-            // 10.0.2.3 → u32: (10<<24)|(0<<16)|(2<<8)|3 = 0x0A000203
-            let dst_ip: u32 = 0x0A000203;
-            let n = kuberve_libc::sys_sendto(fd, query.as_ptr(), query_len as u64, dst_ip, 53);
-            if n < 0 {
-                println!("[pid=3] sendto failed: {}", n);
-            } else {
-                println!("[pid=3] sent {} bytes to 10.0.2.3:53", n);
-            }
-
-            // Ждём reply (polling + yield, чтобы kernel poll_rx успел)
-            let mut rbuf = [0u8; 512];
-            let mut reply_received = false;
-            for attempt in 0..1000 {
-                let mut src_ip = [0u8; 4];
-                let mut src_port: u16 = 0;
-                let r = kuberve_libc::sys_recvfrom(
-                    fd, rbuf.as_mut_ptr(), 512,
-                    src_ip.as_mut_ptr(), &mut src_port as *mut u16);
-                if r > 0 {
-                    print!("[pid=3] UDP reply: ");
-                    for i in 0..r.min(23) { print!("{:02x} ", rbuf[i as usize]); }
+            // Ждём reply
+            let mut rbuf = [0u8; 256];
+            for _attempt in 0..15 {
+                let n = kuberve_libc::sys_tcp_recv(fd, rbuf.as_mut_ptr(), 256);
+                if n > 0 {
+                    println!("[pid=3] TCP reply: {} bytes", n);
+                    let s = core::str::from_utf8(&rbuf[..n as usize]).unwrap_or("<bin>");
+                    print!("[pid=3] content: '{}'", s);
                     println!();
-                    println!("[pid=3] UDP reply from {}.{}.{}.{}:{} len={}",
-                             src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, r);
-                    reply_received = true;
                     break;
                 }
-                if attempt % 100 == 0 {
-                    kuberve_libc::sys_sleep(1);   // 1 тик = 1 сек, даём сети время
-                } else {
-                    kuberve_libc::sys_yield();
-                }
-            }
-            if !reply_received {
-                println!("[pid=3] no UDP reply (timeout)");
+                kuberve_libc::sys_sleep(1);   // 1 сек
             }
             kuberve_libc::sys_close(fd);
-
             sys_exit(0);
         }
         4 => client_hello(2, b"client2 says hi via IPC\n"),
