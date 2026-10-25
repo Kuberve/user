@@ -19,6 +19,10 @@ path = "src/bin/uart.rs"
 name = "tcp"
 path = "src/bin/tcp_client.rs"
 
+[[bin]]
+name = "kv"
+path = "src/bin/kv.rs"
+
 [profile.dev]
 panic = "abort"
 opt-level = 2

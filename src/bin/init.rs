@@ -8,10 +8,9 @@ use core::arch::global_asm;
 use core::alloc::Layout;
 
 use kuberve_libc::{
-    Message,
     BumpAlloc,
-    sys_exit, sys_sleep, sys_send, sys_spawn,
-    sys_open, sys_read, sys_close, sys_kill, sys_wait,
+    sys_exit, sys_sleep, sys_spawn,
+    sys_open, sys_read, sys_close, sys_wait,
     sys_stat, sys_mkdir, sys_unlink, sys_rmdir,
     sys_readdir, sys_write_file,
     uart,
@@ -247,6 +246,21 @@ pub extern "C" fn user_main() -> ! {
         }
     }
 
+    // === B.2 test: spawn kv, parse /tmp/test.kvp ===
+    {
+        let kv_pid = sys_spawn("/system/bin/kv", 2);
+        if kv_pid >= 0 {
+            let code = sys_wait(kv_pid as u64);
+            if code == 0 {
+                uart::puts(b"init: kv ok (exit 0)\n");
+            } else {
+                uart::puts(b"init: kv non-zero exit\n");
+            }
+        } else {
+            uart::puts(b"init: spawn kv FAILED\n");
+        }
+    }
+
     // Прочитать cfg
     let mut cfg = [0u8; 1024];
     let cfg_len = read_cfg("/system/conf/init.cfg", &mut cfg);
@@ -275,57 +289,6 @@ pub extern "C" fn user_main() -> ! {
             }
         }
     }
-
-    // Дать uart подняться до sys_recv
-    sys_sleep(3);
-
-    // IPC #1 → uart
-    let text = b"hello from init\n";
-    let msg = Message {
-        tag: 1,
-        data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
-    };
-    let _ = sys_send(1, &msg);
-    uart::puts(b"init: sent IPC #1\n");
-
-    sys_sleep(2);
-
-    // === A.4 TEST: kill + wait + respawn ===
-    uart::puts(b"init: killing pid=1\n");
-    let r_kill = sys_kill(1);
-    if r_kill == 0 {
-        uart::puts(b"init: kill ok\n");
-    } else {
-        uart::puts(b"init: kill FAILED\n");
-    }
-
-    let r_wait = sys_wait(1);
-    if r_wait == -1 {
-        uart::puts(b"init: wait returned -1 (killed)\n");
-    } else if r_wait >= 0 {
-        uart::puts(b"init: wait returned code >= 0\n");
-    } else {
-        uart::puts(b"init: wait returned unknown\n");
-    }
-
-    // Respawn
-    uart::puts(b"init: respawning uart\n");
-    let new_pid = sys_spawn("/system/bin/uart", 2);
-    if new_pid > 0 {
-        uart::puts(b"init: spawned new uart\n");
-    } else {
-        uart::puts(b"init: respawn FAILED\n");
-    }
-
-    sys_sleep(2);
-
-    // IPC #2 → новый uart
-    let msg2 = Message {
-        tag: 1,
-        data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
-    };
-    let _ = sys_send(new_pid as u64, &msg2);
-    uart::puts(b"init: sent IPC #2 to new pid\n");
 
     loop { sys_sleep(1); }
 }
