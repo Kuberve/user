@@ -11,7 +11,7 @@ use kuberve_libc::{
     Message,
     BumpAlloc,
     sys_exit, sys_getpid, sys_recv, sys_irq_ack,
-    sys_spawn, sys_sleep,
+    sys_spawn, sys_sleep, sys_send,
     uart,
 };
 
@@ -79,6 +79,21 @@ pub extern "C" fn user_main() -> ! {
         0 => {
             // init: спавнит uart_server (child, pid=1) и уходит в сон
             let _ = sys_spawn("USER.ELF", 2);
+
+            // Дать child'у подняться до sys_recv (он стартует с MMIO puts,
+            // потом уходит в sys_recv loop)
+            sys_sleep(10);   // 10 * 100 тиков = 10 сек? нет: sys_sleep(N) = N*TICK_HZ тиков.
+                             // 10 * 100 = 1000 тиков = 10 сек. Слишком много.
+                             // Лучше: sys_sleep(1) = 1 сек — хватит с головой.
+
+            // Отправить сообщение в uart_server (pid=1)
+            let text = b"hello from init\n";
+            let msg = Message {
+                tag: 1,  // WRITE
+                data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
+            };
+            let _ = sys_send(1, &msg);
+
             loop { sys_sleep(1); }
         }
         1 => uart_server_loop(),
