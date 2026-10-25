@@ -11,6 +11,7 @@ use kuberve_libc::{
     Message,
     BumpAlloc,
     sys_exit, sys_sleep, sys_send, sys_spawn,
+    sys_open, sys_read, sys_close,
     uart,
 };
 
@@ -40,20 +41,67 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     sys_exit(1);
 }
 
+fn read_cfg(path: &str, buf: &mut [u8]) -> usize {
+    let fd = sys_open(path, 0);
+    if fd < 0 { return 0; }
+    let n = sys_read(fd, buf.as_mut_ptr(), buf.len() as u64);
+    sys_close(fd);
+    if n <= 0 { 0 } else { n as usize }
+}
+
 #[no_mangle]
 pub extern "C" fn user_main() -> ! {
     uart::puts(b"init: starting\n");
 
-    // Спавним uart_server из /system/bin/uart
-    let r = sys_spawn("/system/bin/uart", 2);
-    if r < 0 {
-        uart::puts(b"init: spawn uart FAILED\n");
+    // Прочитать /system/conf/init.cfg
+    let mut cfg = [0u8; 1024];
+    let cfg_len = read_cfg("/system/conf/init.cfg", &mut cfg);
+
+    if cfg_len == 0 {
+        uart::puts(b"init: cfg missing, fallback to /system/bin/uart\n");
+        let _ = sys_spawn("/system/bin/uart", 2);
+    } else {
+        // Parse: <path> <priority>, # комментарии
+        let cfg_str = match core::str::from_utf8(&cfg[..cfg_len]) {
+            Ok(s) => s,
+            Err(_) => {
+                uart::puts(b"init: cfg not utf8, fallback\n");
+                let _ = sys_spawn("/system/bin/uart", 2);
+                sys_sleep(1);
+                let text = b"hello from init\n";
+                let msg = Message {
+                    tag: 1,
+                    data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
+                };
+                let _ = sys_send(1, &msg);
+                loop { sys_sleep(1); }
+            }
+        };
+
+        for line in cfg_str.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+
+            let mut parts = line.split_whitespace();
+            let path = match parts.next() { Some(p) => p, None => continue };
+            let prio: u8 = match parts.next().and_then(|s| s.parse::<u8>().ok()) {
+                Some(p) => p,
+                None => 2,
+            };
+
+            let r = sys_spawn(path, prio as u64);
+            if r < 0 {
+                uart::puts(b"init: spawn FAILED for ");
+                uart::puts(path.as_bytes());
+                uart::puts(b"\n");
+            }
+        }
     }
 
-    // Дать child'у подняться до sys_recv
+    // Дать сервисам подняться до sys_recv
     sys_sleep(1);
 
-    // IPC: hello to uart_server (pid=1)
+    // IPC hello — для проверки end-to-end
     let text = b"hello from init\n";
     let msg = Message {
         tag: 1,
