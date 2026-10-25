@@ -15,6 +15,10 @@ path = "src/bin/init.rs"
 name = "uart"
 path = "src/bin/uart.rs"
 
+[[bin]]
+name = "tcp"
+path = "src/bin/tcp_client.rs"
+
 [profile.dev]
 panic = "abort"
 opt-level = 2
