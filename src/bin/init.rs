@@ -12,8 +12,10 @@ use kuberve_libc::{
     BumpAlloc,
     sys_exit, sys_sleep, sys_send, sys_spawn,
     sys_open, sys_read, sys_close, sys_kill, sys_wait,
-    sys_stat,
+    sys_stat, sys_mkdir, sys_unlink, sys_rmdir,
+    sys_readdir,
     uart,
+    flags,
 };
 
 global_asm!(
@@ -83,6 +85,122 @@ pub extern "C" fn user_main() -> ! {
             uart::puts(b"\n");
         } else {
             uart::puts(b"init: stat /system FAILED\n");
+        }
+    }
+
+    // === F.2 test: mkdir (idempotent) ===
+    {
+        let r = sys_mkdir("/users/0/test");
+        if r == 0 {
+            uart::puts(b"init: mkdir ok (created or exists)\n");
+        } else {
+            uart::puts(b"init: mkdir FAILED\n");
+        }
+
+        let mut st = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+        let r2 = sys_stat("/users/0/test", &mut st);
+        if r2 == 0 && st.is_dir == 1 {
+            uart::puts(b"init: stat test dir ok, is_dir=1\n");
+        } else {
+            uart::puts(b"init: stat test dir FAILED\n");
+        }
+    }
+
+    // === F.3 test: create file in nested dir ===
+    {
+        let fd = sys_open("/users/0/test/hello.txt", flags::O_CREAT);
+        if fd >= 0 {
+            uart::puts(b"init: create file ok\n");
+            sys_close(fd);
+
+            let mut st = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+            let r = sys_stat("/users/0/test/hello.txt", &mut st);
+            if r == 0 && st.is_dir == 0 && st.size == 0 {
+                uart::puts(b"init: stat created file ok, size=0\n");
+            } else {
+                uart::puts(b"init: stat created file FAILED\n");
+            }
+        } else {
+            uart::puts(b"init: create file FAILED\n");
+        }
+    }
+
+    // === F.4 test: unlink + rmdir ===
+    {
+        let r = sys_unlink("/users/0/test/hello.txt");
+        if r == 0 {
+            uart::puts(b"init: unlink ok\n");
+        } else {
+            uart::puts(b"init: unlink FAILED\n");
+        }
+
+        let mut st = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+        if sys_stat("/users/0/test/hello.txt", &mut st) != 0 {
+            uart::puts(b"init: stat after unlink missing (correct)\n");
+        } else {
+            uart::puts(b"init: stat after unlink still there (BUG)\n");
+        }
+
+        let r2 = sys_rmdir("/users/0/test");
+        if r2 == 0 {
+            uart::puts(b"init: rmdir ok\n");
+        } else {
+            uart::puts(b"init: rmdir FAILED\n");
+        }
+
+        let mut st2 = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+        if sys_stat("/users/0/test", &mut st2) != 0 {
+            uart::puts(b"init: stat after rmdir missing (correct)\n");
+        } else {
+            uart::puts(b"init: stat after rmdir still there (BUG)\n");
+        }
+    }
+
+    // === F.5 test: readdir ===
+    {
+        let empty_entry = kuberve_libc::DirEntry {
+            name: [0u8; 20],
+            is_dir: 0, size: 0, cluster: 0,
+        };
+
+        // /system/bin → INIT, UART
+        let mut entries = [empty_entry; 16];
+        let n = sys_readdir("/system/bin", entries.as_mut_ptr(), 16);
+        if n > 0 {
+            uart::puts(b"init: readdir /system/bin count=");
+            uart::putc(b'0' + (n as u8));
+            uart::puts(b"\n");
+            for i in 0..(n as usize) {
+                let e = &entries[i];
+                let mut end = 0;
+                while end < 20 && e.name[end] != 0 { end += 1; }
+                uart::puts(b"  ");
+                uart::puts(&e.name[..end]);
+                if e.is_dir == 1 { uart::puts(b"/"); }
+                uart::puts(b"\n");
+            }
+        } else {
+            uart::puts(b"init: readdir /system/bin FAILED\n");
+        }
+
+        // /system → BIN, CONF, BOOT
+        let mut entries2 = [empty_entry; 16];
+        let n2 = sys_readdir("/system", entries2.as_mut_ptr(), 16);
+        if n2 > 0 {
+            uart::puts(b"init: readdir /system count=");
+            uart::putc(b'0' + (n2 as u8));
+            uart::puts(b"\n");
+            for i in 0..(n2 as usize) {
+                let e = &entries2[i];
+                let mut end = 0;
+                while end < 20 && e.name[end] != 0 { end += 1; }
+                uart::puts(b"  ");
+                uart::puts(&e.name[..end]);
+                if e.is_dir == 1 { uart::puts(b"/"); }
+                uart::puts(b"\n");
+            }
+        } else {
+            uart::puts(b"init: readdir /system FAILED\n");
         }
     }
 
