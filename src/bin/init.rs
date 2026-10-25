@@ -261,34 +261,6 @@ pub extern "C" fn user_main() -> ! {
         }
     }
 
-    // === B.3 verify: /apps/hello/ ===
-    {
-        let mut st = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
-        if sys_stat("/apps/hello", &mut st) == 0 && st.is_dir == 1 {
-            uart::puts(b"init: /apps/hello exists\n");
-
-            let empty_entry = kuberve_libc::DirEntry {
-                name: [0u8; 20], is_dir: 0, size: 0, cluster: 0,
-            };
-            let mut entries = [empty_entry; 16];
-            let n = sys_readdir("/apps/hello", entries.as_mut_ptr(), 16);
-            uart::puts(b"init: /apps/hello count=");
-            uart::putc(b'0' + (n as u8));
-            uart::puts(b"\n");
-            for i in 0..(n as usize) {
-                let e = &entries[i];
-                let mut end = 0;
-                while end < 20 && e.name[end] != 0 { end += 1; }
-                uart::puts(b"  ");
-                uart::puts(&e.name[..end]);
-                if e.is_dir == 1 { uart::puts(b"/"); }
-                uart::puts(b"\n");
-            }
-        } else {
-            uart::puts(b"init: /apps/hello MISSING\n");
-        }
-    }
-
     // Прочитать cfg
     let mut cfg = [0u8; 1024];
     let cfg_len = read_cfg("/system/conf/init.cfg", &mut cfg);
