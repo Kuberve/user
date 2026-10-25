@@ -12,6 +12,7 @@ use kuberve_libc::{
     BumpAlloc,
     sys_exit, sys_sleep, sys_send, sys_spawn,
     sys_open, sys_read, sys_close, sys_kill, sys_wait,
+    sys_stat,
     uart,
 };
 
@@ -52,6 +53,38 @@ fn read_cfg(path: &str, buf: &mut [u8]) -> usize {
 #[no_mangle]
 pub extern "C" fn user_main() -> ! {
     uart::puts(b"init: starting\n");
+
+    // === F.0+F.1 test: stat на существующих файлах ===
+    {
+        let mut st = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+        let r = sys_stat("/system/bin/uart", &mut st);
+        if r == 0 {
+            uart::puts(b"init: stat uart ok, size=");
+            let mut buf = [0u8; 20];
+            let mut n = st.size;
+            if n == 0 { buf[0] = b'0'; uart::puts(&buf[..1]); }
+            else {
+                let mut i = 0;
+                while n > 0 { buf[i] = b'0' + (n % 10) as u8; n /= 10; i += 1; }
+                while i > 0 { i -= 1; uart::putc(buf[i]); }
+            }
+            uart::puts(b" is_dir=");
+            uart::putc(b'0' + (st.is_dir as u8));
+            uart::puts(b"\n");
+        } else {
+            uart::puts(b"init: stat uart FAILED\n");
+        }
+
+        let mut st2 = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+        let r2 = sys_stat("/system", &mut st2);
+        if r2 == 0 {
+            uart::puts(b"init: stat /system ok, is_dir=");
+            uart::putc(b'0' + (st2.is_dir as u8));
+            uart::puts(b"\n");
+        } else {
+            uart::puts(b"init: stat /system FAILED\n");
+        }
+    }
 
     // Прочитать cfg
     let mut cfg = [0u8; 1024];
