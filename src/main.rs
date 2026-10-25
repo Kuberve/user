@@ -10,10 +10,10 @@ use core::alloc::Layout;
 use kuberve_libc::{
     Message,
     BumpAlloc,
-    sys_exit, sys_getpid, sys_send, sys_recv, sys_irq_ack,
+    sys_exit, sys_getpid, sys_recv, sys_irq_ack,
+    sys_spawn, sys_sleep,
     uart,
 };
-use kuberve_libc::{print, println};
 
 global_asm!(
     ".section .text._start",
@@ -43,7 +43,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 // --- UART server loop (userspace driver) ---
 fn uart_server_loop() -> ! {
-    uart::puts(b"uart_server up, pid=2\n");
+    uart::puts(b"uart_server up, pid=1\n");
     uart::rx_init();
     sys_irq_ack(33);
 
@@ -72,56 +72,16 @@ fn uart_server_loop() -> ! {
     }
 }
 
-fn client_hello(uart_pid: u64, text: &'static [u8]) -> ! {
-    for _ in 0..2 {
-        let msg = Message {
-            tag: 1,
-            data: [text.as_ptr() as u64, text.len() as u64, 0, 0, 0, 0, 0],
-        };
-        sys_send(uart_pid, &msg);
-    }
-    sys_exit(0);
-}
-
 #[no_mangle]
 pub extern "C" fn user_main() -> ! {
     let pid = sys_getpid();
     match pid {
-        2 => uart_server_loop(),
-        3 => {
-            println!("[pid=3] TCP client: connect to 10.0.2.2:8080");
-            let fd = kuberve_libc::sys_socket(2, 1);
-            if fd < 0 { sys_exit(1); }
-
-            let dst_ip: u32 = 0x0A000202;
-            let r = kuberve_libc::sys_connect(fd, dst_ip, 8080);
-            if r < 0 { println!("[pid=3] connect failed"); sys_exit(1); }
-            println!("[pid=3] CONNECTED");
-
-            let msg = b"Hello from Kuberve!\n";
-            kuberve_libc::sys_tcp_send(fd, msg.as_ptr(), msg.len() as u64);
-            println!("[pid=3] sent {}", msg.len());
-
-            let mut rbuf = [0u8; 256];
-            let mut got = 0i64;
-            for _ in 0..15 {
-                let n = kuberve_libc::sys_tcp_recv(fd, rbuf.as_mut_ptr(), 256);
-                if n > 0 {
-                    got = n;
-                    break;
-                }
-                kuberve_libc::sys_sleep(1);
-            }
-            if got > 0 {
-                println!("[pid=3] TCP reply: {} bytes", got);
-            }
-
-            println!("[pid=3] closing...");
-            kuberve_libc::sys_close(fd);
-            println!("[pid=3] closed");
-            sys_exit(0);
+        0 => {
+            // init: спавнит uart_server (child, pid=1) и уходит в сон
+            let _ = sys_spawn("USER.ELF", 2);
+            loop { sys_sleep(1); }
         }
-        4 => client_hello(2, b"client2 says hi via IPC\n"),
+        1 => uart_server_loop(),
         _ => sys_exit(1),
     }
 }
