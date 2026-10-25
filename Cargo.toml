@@ -7,6 +7,14 @@ edition = "2021"
 name = "user"
 path = "src/main.rs"
 
+[[bin]]
+name = "init"
+path = "src/bin/init.rs"
+
+[[bin]]
+name = "uart"
+path = "src/bin/uart.rs"
+
 [profile.dev]
 panic = "abort"
 opt-level = 2
