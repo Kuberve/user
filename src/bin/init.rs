@@ -13,7 +13,7 @@ use kuberve_libc::{
     sys_exit, sys_sleep, sys_send, sys_spawn,
     sys_open, sys_read, sys_close, sys_kill, sys_wait,
     sys_stat, sys_mkdir, sys_unlink, sys_rmdir,
-    sys_readdir,
+    sys_readdir, sys_write_file,
     uart,
     flags,
 };
@@ -201,6 +201,49 @@ pub extern "C" fn user_main() -> ! {
             }
         } else {
             uart::puts(b"init: readdir /system FAILED\n");
+        }
+    }
+
+    // === F.3.1 test: write в nested файл ===
+    {
+        let _ = sys_mkdir("/users/0/test");   // ensure существует (idempotent)
+
+        let fd = sys_open("/users/0/test/data.txt", flags::O_CREAT);
+        if fd >= 0 {
+            let data = b"hello nested write";
+            let written = sys_write_file(fd, data.as_ptr(), data.len() as u64);
+            sys_close(fd);
+
+            if written == data.len() as i64 {
+                uart::puts(b"init: write nested ok\n");
+            } else {
+                uart::puts(b"init: write nested returned wrong count\n");
+            }
+
+            let mut st = kuberve_libc::Stat { size: 0, is_dir: 0, cluster: 0 };
+            if sys_stat("/users/0/test/data.txt", &mut st) == 0 && st.size == data.len() as u32 {
+                uart::puts(b"init: stat after write size ok\n");
+            } else {
+                uart::puts(b"init: stat after write size WRONG\n");
+            }
+
+            // Прочитать обратно
+            let rfd = sys_open("/users/0/test/data.txt", 0);
+            if rfd >= 0 {
+                let mut rbuf = [0u8; 32];
+                let n = sys_read(rfd, rbuf.as_mut_ptr(), 32);
+                sys_close(rfd);
+                if n == data.len() as i64 && rbuf[..n as usize] == data[..] {
+                    uart::puts(b"init: read back matches\n");
+                } else {
+                    uart::puts(b"init: read back MISMATCH\n");
+                }
+            }
+
+            // Cleanup
+            let _ = sys_unlink("/users/0/test/data.txt");
+        } else {
+            uart::puts(b"init: create data.txt FAILED\n");
         }
     }
 
