@@ -1,7 +1,12 @@
 [package]
 name = "user"
-version = "0.1.0"
+version = "0.14.4"
 edition = "2021"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Kuberve/user"
+authors = ["Simonov Zakhar <zaharsimonov6087@gmail.com> (BlackZakha)"]
+description = "Kuberve userspace programs (init, uart, tcp, kv, hw)"
+readme = "README.md"
 
 [[bin]]
 name = "user"
@@ -38,4 +43,4 @@ opt-level = 2
 lto = true
 
 [dependencies]
-kuberve-libc = { path = "../libc" }
+kuberve-libc = { git = "https://github.com/Kuberve/libc" }
