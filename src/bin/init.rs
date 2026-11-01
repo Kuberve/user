@@ -261,6 +261,16 @@ pub extern "C" fn user_main() -> ! {
         }
     }
 
+    // === W.6 test: spawn hw (GUI API) ===
+    {
+        let hw_pid = sys_spawn("/system/bin/hw", 2);
+        if hw_pid >= 0 {
+            uart::puts(b"init: spawned hw (GUI)\n");
+        } else {
+            uart::puts(b"init: spawn hw FAILED\n");
+        }
+    }
+
     // Прочитать cfg
     let mut cfg = [0u8; 1024];
     let cfg_len = read_cfg("/system/conf/init.cfg", &mut cfg);

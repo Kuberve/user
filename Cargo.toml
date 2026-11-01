@@ -23,6 +23,10 @@ path = "src/bin/tcp_client.rs"
 name = "kv"
 path = "src/bin/kv.rs"
 
+[[bin]]
+name = "hw"
+path = "src/bin/hello_win.rs"
+
 [profile.dev]
 panic = "abort"
 opt-level = 2
