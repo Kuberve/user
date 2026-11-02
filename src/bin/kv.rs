@@ -360,6 +360,196 @@ pub extern "C" fn user_main() -> ! {
             uart::puts(b"\n");
         }
 
+        // ========== 5) Update + Search ==========
+        do_update_and_search();
+
         sys_exit(0);
     }
+}
+
+// ============================================================
+// v0.15.5: kv update + kv search
+// ============================================================
+
+/// Read /system/conf/repo.cfg. Returns (host[4], port, index_path).
+/// Fallback to 10.0.2.2:8080:/index.txt if cfg missing.
+unsafe fn read_repo_cfg() -> ([u8; 4], u16, [u8; 64], usize) {
+    let mut host = [10, 0, 2, 2];
+    let mut port: u16 = 8080;
+    let mut index = [0u8; 64];
+    let mut index_len = 0usize;
+    for (i, &b) in b"/index.txt".iter().enumerate() {
+        index[i] = b;
+        index_len += 1;
+    }
+
+    let fd = sys_open("/system/conf/repo.cfg", 0);
+    if fd < 0 { return (host, port, index, index_len); }
+
+    let mut buf = [0u8; 256];
+    let n = sys_read(fd, buf.as_mut_ptr(), 256);
+    sys_close(fd);
+    if n <= 0 { return (host, port, index, index_len); }
+
+    let cfg = core::str::from_utf8(&buf[..n as usize]).unwrap_or("");
+    for line in cfg.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        if let Some(eq) = line.find('=') {
+            let k = line[..eq].trim();
+            let v = line[eq+1..].trim();
+            match k {
+                "host" => {
+                    // "10.0.2.2" → [10, 0, 2, 2]
+                    let mut p = [0u8; 4];
+                    let mut idx = 0;
+                    let mut cur: u32 = 0;
+                    let mut any = false;
+                    for &b in v.as_bytes() {
+                        if b == b'.' {
+                            if idx < 4 { p[idx] = cur as u8; }
+                            idx += 1; cur = 0;
+                        } else if b >= b'0' && b <= b'9' {
+                            cur = cur * 10 + (b - b'0') as u32;
+                            any = true;
+                        }
+                    }
+                    if idx < 4 && any { p[idx] = cur as u8; }
+                    if idx == 3 { host = p; }
+                }
+                "port" => {
+                    let mut n: u32 = 0;
+                    for &b in v.as_bytes() {
+                        if b >= b'0' && b <= b'9' { n = n * 10 + (b - b'0') as u32; }
+                    }
+                    if n > 0 && n < 65536 { port = n as u16; }
+                }
+                "index" => {
+                    let bytes = v.as_bytes();
+                    let copy = core::cmp::min(bytes.len(), index.len());
+                    for i in 0..copy { index[i] = bytes[i]; }
+                    index_len = copy;
+                }
+                _ => {}
+            }
+        }
+    }
+    (host, port, index, index_len)
+}
+
+/// Print one IP octet without leading zeros.
+unsafe fn put_u8(n: u8) {
+    if n >= 100 {
+        uart::putc(b'0' + n / 100);
+        uart::putc(b'0' + (n / 10) % 10);
+    } else if n >= 10 {
+        uart::putc(b'0' + n / 10);
+    }
+    uart::putc(b'0' + n % 10);
+}
+
+unsafe fn put_ip(ip: [u8; 4]) {
+    put_u8(ip[0]); uart::putc(b'.');
+    put_u8(ip[1]); uart::putc(b'.');
+    put_u8(ip[2]); uart::putc(b'.');
+    put_u8(ip[3]);
+}
+
+unsafe fn do_update_and_search() {
+    use kuberve_libc::http_get;
+
+    // Wait for DHCP + ARP to settle. EL0 kv starts in parallel with
+    // kmain's graphics/keyboard/mouse init, and DHCP runs *after*
+    // those, so the first connect fails with "SYN send FAILED" —
+    // http.rs retry masks it but wastes 1 second.
+    sys_sleep(2);
+
+    uart::puts(b"kv: --- update ---\n");
+
+    // Ensure /packages exists (idempotent)
+    let _ = sys_mkdir("/packages");
+
+    let (host, port, index_buf, index_len) = read_repo_cfg();
+    let index_path = core::str::from_utf8(&index_buf[..index_len]).unwrap_or("/index.txt");
+
+    uart::puts(b"kv: repo ");
+    put_ip(host);
+    uart::puts(b" idx=");
+    uart::puts(index_path.as_bytes());
+    uart::puts(b"\n");
+
+    match http_get(host, port, index_path) {
+        Ok(body) => {
+            uart::puts(b"kv: got ");
+            print_u64(body.len() as u64);
+            uart::puts(b" bytes\n");
+
+            // Save to /packages/index.txt
+            let fd = sys_open("/packages/index.txt", flags::O_CREAT);
+            if fd < 0 {
+                uart::puts(b"kv: cannot save index\n");
+                return;
+            }
+            let w = sys_write_file(fd, body.as_ptr(), body.len() as u64);
+            sys_close(fd);
+            if w < 0 {
+                uart::puts(b"kv: write FAILED\n");
+                return;
+            }
+
+            // Count non-comment lines
+            let mut n = 0u32;
+            for line in core::str::from_utf8(body).unwrap_or("").lines() {
+                let l = line.trim();
+                if !l.is_empty() && !l.starts_with('#') { n += 1; }
+            }
+            uart::puts(b"kv: ");
+            print_u64(n as u64);
+            uart::puts(b" packages available\n");
+        }
+        Err(e) => {
+            uart::puts(b"kv: update FAILED: ");
+            uart::puts(e.as_str().as_bytes());
+            uart::puts(b"\n");
+            return;
+        }
+    }
+
+    // ========== search "hello" ==========
+    uart::puts(b"kv: --- search hello ---\n");
+
+    let ifd = sys_open("/packages/index.txt", 0);
+    if ifd < 0 {
+        uart::puts(b"kv: index missing\n");
+        return;
+    }
+    let mut ibuf = [0u8; 2048];
+    let n = sys_read(ifd, ibuf.as_mut_ptr(), 2048);
+    sys_close(ifd);
+    if n <= 0 {
+        uart::puts(b"kv: index empty\n");
+        return;
+    }
+
+    let content = core::str::from_utf8(&ibuf[..n as usize]).unwrap_or("");
+    let mut found = 0u32;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        if let Some(eq) = line.find('=') {
+            let name = line[..eq].trim();
+            let ver = line[eq+1..].trim();
+            if name.contains("hello") {
+                uart::puts(b"  ");
+                uart::puts(name.as_bytes());
+                uart::puts(b"  ");
+                uart::puts(ver.as_bytes());
+                uart::puts(b"\n");
+                found += 1;
+            }
+        }
+    }
+    uart::puts(b"kv: found ");
+    print_u64(found as u64);
+    uart::puts(b" match(es)\n");
 }
