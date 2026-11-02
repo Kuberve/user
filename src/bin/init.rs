@@ -271,6 +271,31 @@ pub extern "C" fn user_main() -> ! {
         }
     }
 
+    // === v0.15.5 test: HTTP client ===
+    {
+        let httpc_pid = sys_spawn("/system/bin/httpc", 2);
+        if httpc_pid >= 0 {
+            uart::puts(b"init: spawned httpc\n");
+            let code = sys_wait(httpc_pid as u64);
+            if code == 0 {
+                uart::puts(b"init: httpc ok (exit 0)\n");
+            } else {
+                uart::puts(b"init: httpc exit ");
+                let mut buf = [0u8; 20];
+                let mut n = code as u32;
+                if n == 0 { buf[0] = b'0'; uart::puts(&buf[..1]); }
+                else {
+                    let mut i = 0;
+                    while n > 0 { buf[i] = b'0' + (n % 10) as u8; n /= 10; i += 1; }
+                    while i > 0 { i -= 1; uart::putc(buf[i]); }
+                }
+                uart::puts(b"\n");
+            }
+        } else {
+            uart::puts(b"init: spawn httpc FAILED\n");
+        }
+    }
+
     // Прочитать cfg
     let mut cfg = [0u8; 1024];
     let cfg_len = read_cfg("/system/conf/init.cfg", &mut cfg);

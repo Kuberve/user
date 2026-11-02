@@ -158,7 +158,7 @@ unsafe fn remove_recursive(path_buf: &mut [u8], path_len: usize) -> u32 {
 
         let mut child_buf = [0u8; 256];
         for j in 0..path_len { child_buf[j] = path_buf[j]; }
-        let clen = join3(&mut child_buf[path_len..], b"", name) + path_len;
+        let _clen = join3(&mut child_buf[path_len..], b"", name) + path_len;
         // join3 с пустым a даст "/<name>", надо поправить: просто добавить "/name"
         // Упрощаем: копируем path_len + "/" + name
         let mut clen2 = path_len;

@@ -6,7 +6,6 @@ license = "AGPL-3.0-or-later"
 repository = "https://github.com/Kuberve/user"
 authors = ["Simonov Zakhar <zaharsimonov6087@gmail.com> (BlackZakha)"]
 description = "Kuberve userspace programs (init, uart, tcp, kv, hw)"
-readme = "README.md"
 
 [[bin]]
 name = "user"
@@ -32,6 +31,10 @@ path = "src/bin/kv.rs"
 name = "hw"
 path = "src/bin/hello_win.rs"
 
+[[bin]]
+name = "httpc"
+path = "src/bin/httpc.rs"
+
 [profile.dev]
 panic = "abort"
 opt-level = 2
@@ -44,3 +47,8 @@ lto = true
 
 [dependencies]
 kuberve-libc = { git = "https://github.com/Kuberve/libc" }
+
+[lints.rust]
+dead_code = "allow"
+static_mut_refs = "allow"
+special_module_name = "allow"

@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
+#![allow(static_mut_refs)]
+#![allow(dead_code)]
 
 extern crate alloc;
 
-use core::arch::{asm, global_asm};
+use core::arch::global_asm;
 use core::alloc::Layout;
 
 use kuberve_libc::{
